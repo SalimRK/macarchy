@@ -34,9 +34,14 @@ remove the `macchanger` package.
 
 Click the icon to open the panel: one row per real network interface,
 showing its current MAC (and the permanent one, once randomized), with a
-Randomize/Restore button. "Restore All" appears once anything is
-randomized — the escape hatch if you lose track of which interfaces you
-touched.
+Randomize/Restore button. Each row also has a collapsed "custom MAC"
+link for setting a specific address instead of a random one. "Restore
+All" appears once anything is randomized — the escape hatch if you lose
+track of which interfaces you touched.
+
+<p align="center">
+  <img src="preview.png" alt="Macarchy panel" width="600">
+</p>
 
 ## Commands
 
@@ -45,7 +50,8 @@ touched.
 | `macarchy status [--json]` | Current state of every real interface. |
 | `macarchy randomize <iface>` | Randomize one interface's MAC. |
 | `macarchy restore <iface>` | Restore one interface's permanent MAC. |
-| `macarchy toggle <iface>` | Flip based on current state. |
+| `macarchy set <iface> <mac>` | Set one interface to a specific MAC address. |
+| `macarchy toggle <iface>` | Flip between randomized and permanent. |
 | `macarchy panic` | Restore every interface at once. |
 | `macarchy setup` / `uninstall [--purge]` | Install or remove the system side. Terminal + sudo only. |
 
