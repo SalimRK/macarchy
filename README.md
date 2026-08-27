@@ -11,7 +11,7 @@ it isn't already there.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/oniomarchy/macarchy.git --enable
+omarchy plugin add https://github.com/SalimRK/macarchy.git --enable
 sudo ~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy setup
 ```
 

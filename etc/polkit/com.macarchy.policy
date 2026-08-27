@@ -28,7 +28,7 @@
 -->
 <policyconfig>
   <vendor>Macarchy</vendor>
-  <vendor_url>https://github.com/oniomarchy/macarchy</vendor_url>
+  <vendor_url>https://github.com/SalimRK/macarchy</vendor_url>
 
   <action id="com.macarchy.manage">
     <description>Manage network interface MAC addresses</description>

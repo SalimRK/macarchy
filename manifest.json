@@ -3,7 +3,7 @@
   "id": "oniomarchy.macarchy",
   "name": "Macarchy",
   "version": "0.1.0",
-  "author": "oniomarchy",
+  "author": "cyberbow",
   "license": "MIT",
   "description": "Randomize or restore a network interface's MAC address from the Omarchy bar.",
   "kinds": ["bar-widget"],
