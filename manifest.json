@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "oniomarchy.macarchy",
+  "name": "Macarchy",
+  "version": "0.1.0",
+  "author": "oniomarchy",
+  "license": "MIT",
+  "description": "Randomize or restore a network interface's MAC address from the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "MAC",
+    "description": "Per-interface MAC randomize/restore, with a one-click restore-all.",
+    "category": "Network",
+    "aliases": [
+      "mac",
+      "macchanger",
+      "spoof",
+      "randomize",
+      "privacy",
+      "network"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 5
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 2,
+        "max": 300,
+        "step": 1,
+        "defaultValue": 5
+      }
+    ]
+  }
+}

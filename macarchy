@@ -1,0 +1,308 @@
+#!/bin/bash
+#
+# macarchy -- randomize or restore a network interface's MAC address, from
+# the Omarchy bar.
+#
+# Structure mirrors tormarchy (https://github.com/TripleU613/tormarchy):
+# one script is the whole system layer, dispatched by subcommand, with a
+# single require_root() that self-elevates via sudo (terminal) or pkexec
+# (no terminal, e.g. a bar click) rather than the caller having to know
+# which one applies.
+
+set -uo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+umask 077
+
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+ARGV=("$@")
+
+BIN_DIR="/usr/local/bin"
+POLKIT_ACTIONS="/usr/share/polkit-1/actions"
+POLKIT_RULES="/etc/polkit-1/rules.d"
+
+die() { echo "macarchy: $*" >&2; exit 1; }
+
+# Self-elevates exactly like tormarchy's require_root: sudo from a real
+# terminal, pkexec otherwise (a bar click has no stdin tty to prompt on).
+require_root() {
+  (( EUID == 0 )) && return 0
+  if [[ -t 0 ]]; then
+    exec sudo "$SELF" "${ARGV[@]}"
+  else
+    exec pkexec "$SELF" "${ARGV[@]}"
+  fi
+}
+
+# setup/uninstall must not be reachable through the passwordless polkit
+# rule that "manage" actions get -- same reasoning as tormarchy's
+# require_terminal_root: a real terminal + sudo only.
+require_terminal_root() {
+  [[ -z ${PKEXEC_UID:-} ]] || die "run this from a terminal with sudo, not through polkit"
+  (( EUID == 0 )) || die "run this with sudo"
+}
+
+# Real ethernet-type interfaces only -- excludes lo, tun/wg/docker bridges,
+# anything without a link/ether line.
+real_interfaces() {
+  ip -o link show 2>/dev/null | grep 'link/ether' \
+    | sed -E 's/^[0-9]+:\s+([^:@]+)(@[^:]+)?:.*/\1/'
+}
+
+iface_exists() {
+  local iface="$1"
+  real_interfaces | grep -qx -- "$iface"
+}
+
+# Prints "<current>\t<permanent>" for one interface, or fails if macchanger
+# can't read it (interface gone, no permanent-address support).
+iface_macs() {
+  local iface="$1" status current permanent
+  status=$(macchanger -s "$iface" 2>/dev/null) || return 1
+  current=$(awk 'NR==1{print $3}' <<<"$status")
+  permanent=$(awk 'NR==2{print $3}' <<<"$status")
+  [[ -n $current && -n $permanent ]] || return 1
+  printf '%s\t%s\n' "$current" "$permanent"
+}
+
+is_randomized() {
+  local iface="$1" current permanent
+  IFS=$'\t' read -r current permanent < <(iface_macs "$iface") || return 1
+  [[ $current != "$permanent" ]]
+}
+
+nm_state() {
+  command -v nmcli >/dev/null 2>&1 || return 0
+  nmcli -t -f DEVICE,STATE device status 2>/dev/null | awk -F: -v d="$1" '$1==d{print $2}'
+}
+
+# macchanger refuses a live interface ("Device or resource busy"). If
+# NetworkManager manages it, let go first so it doesn't fight to bring the
+# link back up mid-change, then bring the link itself down -- macchanger
+# needs that regardless of what nmcli disconnect alone does to link state.
+# Echoes 1 if NetworkManager was managing it (so the caller knows to
+# reconnect after), 0 otherwise.
+release_for_change() {
+  local iface="$1" state managed=0
+  state=$(nm_state "$iface")
+  if [[ -n $state && $state != "unmanaged" ]]; then
+    nmcli device disconnect "$iface" >/dev/null 2>&1
+    managed=1
+  fi
+  ip link set "$iface" down
+  printf '%s' "$managed"
+}
+
+reclaim_after_change() {
+  local iface="$1" was_managed="$2"
+  ip link set "$iface" up
+  (( was_managed )) && nmcli device connect "$iface" >/dev/null 2>&1
+  return 0
+}
+
+change_mac() {
+  local iface="$1" mode="$2" was_managed
+  was_managed=$(release_for_change "$iface")
+  if [[ $mode == randomize ]]; then
+    macchanger -r "$iface" >/dev/null || { reclaim_after_change "$iface" "$was_managed"; die "macchanger -r $iface failed"; }
+  else
+    macchanger -p "$iface" >/dev/null || { reclaim_after_change "$iface" "$was_managed"; die "macchanger -p $iface failed"; }
+  fi
+  reclaim_after_change "$iface" "$was_managed"
+}
+
+cmd_status() {
+  local json="${1:-}" first=1 iface current permanent randomized
+
+  if [[ $json == --json ]]; then
+    printf '{\n  "interfaces": [\n'
+    while IFS= read -r iface; do
+      [[ -n $iface ]] || continue
+      IFS=$'\t' read -r current permanent < <(iface_macs "$iface") || continue
+      randomized=false
+      [[ $current != "$permanent" ]] && randomized=true
+      (( first )) || printf ',\n'
+      first=0
+      printf '    {"iface": "%s", "current": "%s", "permanent": "%s", "randomized": %s}' \
+        "$iface" "$current" "$permanent" "$randomized"
+    done < <(real_interfaces)
+    printf '\n  ]\n}\n'
+    return 0
+  fi
+
+  while IFS= read -r iface; do
+    [[ -n $iface ]] || continue
+    IFS=$'\t' read -r current permanent < <(iface_macs "$iface") || { echo "$iface: unreadable (no permanent-address support?)"; continue; }
+    if [[ $current != "$permanent" ]]; then
+      echo "$iface: randomized ($current, permanent is $permanent)"
+    else
+      echo "$iface: permanent ($permanent)"
+    fi
+  done < <(real_interfaces)
+}
+
+cmd_randomize() {
+  local iface="${1:?usage: macarchy randomize <iface>}"
+  iface_exists "$iface" || die "no such interface: $iface"
+  require_root
+  change_mac "$iface" randomize
+  echo "Randomized $iface."
+}
+
+cmd_restore() {
+  local iface="${1:?usage: macarchy restore <iface>}"
+  iface_exists "$iface" || die "no such interface: $iface"
+  require_root
+  change_mac "$iface" restore
+  echo "Restored $iface to its permanent MAC."
+}
+
+# Flips based on current state, since a single bar click / menu action
+# can't branch on state itself.
+cmd_toggle() {
+  local iface="${1:?usage: macarchy toggle <iface>}"
+  iface_exists "$iface" || die "no such interface: $iface"
+  require_root
+  if is_randomized "$iface"; then
+    change_mac "$iface" restore
+    echo "Restored $iface to its permanent MAC."
+  else
+    change_mac "$iface" randomize
+    echo "Randomized $iface."
+  fi
+}
+
+# The escape hatch: every real interface back to its permanent MAC.
+cmd_panic() {
+  require_root
+  local iface any=0
+  while IFS= read -r iface; do
+    [[ -n $iface ]] || continue
+    if is_randomized "$iface"; then
+      change_mac "$iface" restore
+      echo "Restored $iface."
+      any=1
+    fi
+  done < <(real_interfaces)
+  (( any )) || echo "Nothing was randomized."
+}
+
+cmd_setup() {
+  require_terminal_root
+  local repo_dir target_user registered
+  repo_dir=$(dirname "$SELF")
+  target_user="${SUDO_USER:-}"
+
+  step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+  step "Installing macchanger"
+  if command -v macchanger >/dev/null 2>&1; then
+    echo "  already installed"
+  else
+    pacman -S --needed --noconfirm macchanger || die "could not install macchanger"
+  fi
+
+  step "Installing macarchy into $BIN_DIR"
+  install -m 0755 "$SELF" "$BIN_DIR/macarchy"
+  echo "  $BIN_DIR/macarchy"
+
+  step "Installing the polkit policy"
+  if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$repo_dir/etc/polkit/com.macarchy.policy" \
+      || die "the polkit policy is not well-formed XML; refusing to install it"
+    echo "  policy XML is well-formed"
+  fi
+  install -m 0644 "$repo_dir/etc/polkit/com.macarchy.policy" "$POLKIT_ACTIONS/com.macarchy.policy"
+  echo "  $POLKIT_ACTIONS/com.macarchy.policy"
+
+  install -d -m 0755 "$POLKIT_RULES"
+  if [[ -z $target_user ]]; then
+    echo "  SKIPPED the rule: could not tell who invoked sudo, so it cannot name a user." >&2
+  else
+    sed "s/@MACARCHY_USER@/$target_user/g" \
+      "$repo_dir/etc/polkit/49-macarchy.rules.in" >"$POLKIT_RULES/49-macarchy.rules"
+    chmod 0644 "$POLKIT_RULES/49-macarchy.rules"
+    echo "  $POLKIT_RULES/49-macarchy.rules (granted to $target_user)"
+  fi
+
+  step "Verifying polkit registered the action"
+  if command -v pkaction >/dev/null 2>&1; then
+    registered=$(pkaction 2>/dev/null | grep -c '^com\.macarchy\.')
+    (( registered >= 1 )) && echo "  $registered action registered" \
+      || echo "  WARNING: the action did not register; toggling will prompt for a password" >&2
+  fi
+
+  cat <<DONE
+
+  Click an interface in the bar, or run:  macarchy toggle <iface>
+  Restore everything at once:             macarchy panic
+DONE
+}
+
+cmd_uninstall() {
+  require_terminal_root
+  local purge=0
+  [[ ${1:-} == --purge ]] && purge=1
+
+  step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+  # Restore every interface FIRST, while macchanger is still definitely
+  # installed and this script is still in place -- leaving the machine on
+  # a randomized MAC with the tooling gone would be a worse state than the
+  # one uninstall started from.
+  step "Restoring interfaces to their permanent MAC"
+  cmd_panic
+
+  step "Removing the polkit rule and policy"
+  rm -f "$POLKIT_RULES/49-macarchy.rules" "$POLKIT_ACTIONS/com.macarchy.policy"
+  echo "  removed"
+
+  step "Removing $BIN_DIR/macarchy"
+  rm -f "$BIN_DIR/macarchy"
+
+  if (( purge )); then
+    step "Purging"
+    pacman -Rns --noconfirm macchanger 2>/dev/null && echo "  removed the macchanger package" \
+      || echo "  left the macchanger package (in use or already gone)"
+  fi
+
+  cat <<DONE
+
+  Macarchy's system side is removed. The plugin itself is still in the
+  bar; remove it with:
+
+    omarchy plugin disable oniomarchy.macarchy
+DONE
+}
+
+cmd_help() {
+  cat <<USAGE
+macarchy -- randomize or restore a network interface's MAC address, from
+the Omarchy bar.
+
+  status [--json]        Current state of every real interface.
+  randomize <iface>      Randomize one interface's MAC.
+  restore <iface>        Restore one interface's permanent MAC.
+  toggle <iface>         Flip based on current state.
+  panic                  Restore every interface at once.
+  setup / uninstall [--purge]   Install or remove the system side.
+                                 Terminal + sudo only.
+USAGE
+}
+
+command="${1:-help}"
+shift || true
+
+case "$command" in
+status)     cmd_status "$@" ;;
+randomize)  cmd_randomize "$@" ;;
+restore)    cmd_restore "$@" ;;
+toggle)     cmd_toggle "$@" ;;
+panic)      cmd_panic "$@" ;;
+setup)      cmd_setup "$@" ;;
+uninstall)  cmd_uninstall "$@" ;;
+help | -h | --help) cmd_help ;;
+*)          cmd_help >&2; die "unknown command: $command" ;;
+esac
