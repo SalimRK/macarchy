@@ -26,6 +26,11 @@ Panel {
   readonly property color barIconColor: service.anyRandomized ? barForeground : dim
   readonly property string icon: String.fromCodePoint(0xf074) // fa-random
 
+  // Client-side gate only, for the Set button's enabled state -- the real
+  // validation the security boundary relies on lives in the CLI script
+  // itself (is_valid_mac), not here.
+  readonly property var macRe: /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$/
+
   Service {
     id: service
     settings: root.settings
@@ -116,42 +121,94 @@ Panel {
           id: row
           required property var modelData
           width: column.width
-          implicitHeight: rowLayout.implicitHeight
+          implicitHeight: rowColumn.implicitHeight
 
-          RowLayout {
-            id: rowLayout
+          Column {
+            id: rowColumn
             width: parent.width
-            spacing: Style.space(10)
+            spacing: Style.space(6)
 
-            Column {
-              Layout.fillWidth: true
-              spacing: Style.space(2)
+            RowLayout {
+              width: parent.width
+              spacing: Style.space(10)
 
-              Text {
-                text: row.modelData.iface
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
+              Column {
+                Layout.fillWidth: true
+                spacing: Style.space(2)
+
+                Text {
+                  text: row.modelData.iface
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  font.bold: true
+                }
+
+                Text {
+                  text: row.modelData.current
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                  width: parent.width
+                }
+
+                // Separate line rather than crammed onto the current-MAC
+                // line -- two MAC addresses plus a label don't fit
+                // alongside the Randomize/Restore button on one line
+                // without truncating (confirmed live: it was cutting off).
+                Text {
+                  visible: row.modelData.randomized
+                  text: "permanent: " + row.modelData.permanent
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                  width: parent.width
+                }
               }
 
-              Text {
-                text: row.modelData.randomized
-                  ? row.modelData.current + " (permanent: " + row.modelData.permanent + ")"
-                  : row.modelData.current
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
-                width: parent.width
+              Button {
+                text: row.modelData.randomized ? "Restore" : "Randomize"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: service.toggle(row.modelData.iface)
               }
             }
 
-            Button {
-              text: row.modelData.randomized ? "Restore" : "Randomize"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              onClicked: service.toggle(row.modelData.iface)
+            // Set to a specific address rather than a random one. Enabled
+            // only once the text matches a real MAC -- the CLI's own
+            // is_valid_mac is the actual security boundary, this is just
+            // UI feedback.
+            RowLayout {
+              width: parent.width
+              spacing: Style.space(6)
+
+              TextField {
+                id: macField
+                Layout.fillWidth: true
+                placeholderText: "xx:xx:xx:xx:xx:xx"
+                foreground: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                verticalPadding: Style.space(4)
+                onAccepted: {
+                  if (!root.macRe.test(text)) return
+                  service.setMac(row.modelData.iface, text)
+                  text = ""
+                }
+              }
+
+              Button {
+                text: "Set"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                enabled: root.macRe.test(macField.text)
+                onClicked: {
+                  service.setMac(row.modelData.iface, macField.text)
+                  macField.text = ""
+                }
+              }
             }
           }
         }

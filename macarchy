@@ -102,15 +102,24 @@ reclaim_after_change() {
   return 0
 }
 
-change_mac() {
-  local iface="$1" mode="$2" was_managed
+# Runs `macchanger <macchanger_args...> <iface>` around the
+# release/reclaim dance, so randomize (-r), restore (-p), and a specific
+# address (-m <mac>) all share one code path.
+apply_mac() {
+  local iface="$1"; shift
+  local was_managed
   was_managed=$(release_for_change "$iface")
-  if [[ $mode == randomize ]]; then
-    macchanger -r "$iface" >/dev/null || { reclaim_after_change "$iface" "$was_managed"; die "macchanger -r $iface failed"; }
-  else
-    macchanger -p "$iface" >/dev/null || { reclaim_after_change "$iface" "$was_managed"; die "macchanger -p $iface failed"; }
+  if ! macchanger "$@" "$iface" >/dev/null; then
+    reclaim_after_change "$iface" "$was_managed"
+    die "macchanger $* $iface failed"
   fi
   reclaim_after_change "$iface" "$was_managed"
+}
+
+MAC_RE='^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$'
+
+is_valid_mac() {
+  [[ $1 =~ $MAC_RE ]]
 }
 
 cmd_status() {
@@ -147,7 +156,7 @@ cmd_randomize() {
   local iface="${1:?usage: macarchy randomize <iface>}"
   iface_exists "$iface" || die "no such interface: $iface"
   require_root
-  change_mac "$iface" randomize
+  apply_mac "$iface" -r
   echo "Randomized $iface."
 }
 
@@ -155,8 +164,20 @@ cmd_restore() {
   local iface="${1:?usage: macarchy restore <iface>}"
   iface_exists "$iface" || die "no such interface: $iface"
   require_root
-  change_mac "$iface" restore
+  apply_mac "$iface" -p
   echo "Restored $iface to its permanent MAC."
+}
+
+# A specific address rather than a random one -- validated before
+# require_root so a malformed address never reaches the privileged path.
+cmd_set() {
+  local iface="${1:?usage: macarchy set <iface> <mac>}"
+  local mac="${2:?usage: macarchy set <iface> <mac>}"
+  iface_exists "$iface" || die "no such interface: $iface"
+  is_valid_mac "$mac" || die "invalid MAC address: $mac (expected xx:xx:xx:xx:xx:xx)"
+  require_root
+  apply_mac "$iface" -m "$mac"
+  echo "Set $iface to $mac."
 }
 
 # Flips based on current state, since a single bar click / menu action
@@ -166,10 +187,10 @@ cmd_toggle() {
   iface_exists "$iface" || die "no such interface: $iface"
   require_root
   if is_randomized "$iface"; then
-    change_mac "$iface" restore
+    apply_mac "$iface" -p
     echo "Restored $iface to its permanent MAC."
   else
-    change_mac "$iface" randomize
+    apply_mac "$iface" -r
     echo "Randomized $iface."
   fi
 }
@@ -181,7 +202,7 @@ cmd_panic() {
   while IFS= read -r iface; do
     [[ -n $iface ]] || continue
     if is_randomized "$iface"; then
-      change_mac "$iface" restore
+      apply_mac "$iface" -p
       echo "Restored $iface."
       any=1
     fi
@@ -285,7 +306,8 @@ the Omarchy bar.
   status [--json]        Current state of every real interface.
   randomize <iface>      Randomize one interface's MAC.
   restore <iface>        Restore one interface's permanent MAC.
-  toggle <iface>         Flip based on current state.
+  set <iface> <mac>      Set one interface to a specific MAC address.
+  toggle <iface>         Flip between randomized and permanent.
   panic                  Restore every interface at once.
   setup / uninstall [--purge]   Install or remove the system side.
                                  Terminal + sudo only.
@@ -299,6 +321,7 @@ case "$command" in
 status)     cmd_status "$@" ;;
 randomize)  cmd_randomize "$@" ;;
 restore)    cmd_restore "$@" ;;
+set)        cmd_set "$@" ;;
 toggle)     cmd_toggle "$@" ;;
 panic)      cmd_panic "$@" ;;
 setup)      cmd_setup "$@" ;;

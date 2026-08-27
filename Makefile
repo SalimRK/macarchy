@@ -13,7 +13,7 @@ QML_FILES := Panel.qml Service.qml
 # not this linter's local-directory scan.
 qml-check:
 	$(QMLLINT) -I /usr/share/omarchy/shell $(QML_FILES) 2>&1 \
-	  | grep -vE 'qs\.(Commons|Ui)|Failed to import|Unqualified access|unresolved-type|was not found|ComponentBehavior|Did you mean|inheritance-cycle|unknown grouped property scope anchors|^\s*\^|^---$$|^import |^$$' \
+	  | grep -vE 'qs\.(Commons|Ui)|Failed to import|Unqualified access|unresolved-type|was not found|ComponentBehavior|Did you mean|inheritance-cycle|unknown grouped property scope (anchors|font)|^\s*\^|^---$$|^import |^$$' \
 	  || true
 
 shellcheck:

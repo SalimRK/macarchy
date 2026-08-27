@@ -90,6 +90,11 @@ Item {
     root.refresh()
   }
 
+  function setMac(iface, mac) {
+    Quickshell.execDetached(["/usr/local/bin/macarchy", "set", iface, mac])
+    root.refresh()
+  }
+
   function panic() {
     Quickshell.execDetached(["/usr/local/bin/macarchy", "panic"])
     root.refresh()
