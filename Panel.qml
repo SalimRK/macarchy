@@ -31,6 +31,31 @@ Panel {
   // itself (is_valid_mac), not here.
   readonly property var macRe: /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$/
 
+  // Whether each row's "set a specific MAC" input is expanded. Keyed by
+  // iface name and kept here rather than on the delegate Item itself:
+  // service.interfaces is a whole new array on every poll (no stable
+  // object identity), so any state that lived on the delegate would be
+  // at risk of resetting whenever a refresh lands mid-interaction.
+  property var expandedIfaces: ({})
+
+  function isExpanded(iface) { return !!expandedIfaces[iface] }
+  function toggleExpanded(iface) {
+    var next = Object.assign({}, expandedIfaces)
+    next[iface] = !next[iface]
+    expandedIfaces = next
+  }
+
+  // Verb shown on a row's action button while its own action is running;
+  // "" for every other row, which keeps their normal Randomize/Restore text.
+  function actionLabel(iface) {
+    if (service.pendingIface !== iface) return ""
+    if (service.pendingAction === "randomize") return "Randomizing…"
+    if (service.pendingAction === "restore") return "Restoring…"
+    if (service.pendingAction === "toggle") return "Working…"
+    if (service.pendingAction === "set") return "Setting…"
+    return ""
+  }
+
   Service {
     id: service
     settings: root.settings
@@ -169,10 +194,38 @@ Panel {
               }
 
               Button {
-                text: row.modelData.randomized ? "Restore" : "Randomize"
+                readonly property string label: root.actionLabel(row.modelData.iface)
+                text: label !== "" ? label : (row.modelData.randomized ? "Restore" : "Randomize")
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+                enabled: !service.busy
                 onClicked: service.toggle(row.modelData.iface)
+              }
+            }
+
+            // Collapsed by default -- always showing a text field per row
+            // was clutter for the common case (most clicks are just
+            // Randomize/Restore), confirmed against the first version.
+            // Accent color + bold + underline-on-hover so it reads as a
+            // link rather than a plain label -- the initial dim/plain
+            // version didn't signal clickability.
+            Text {
+              id: customMacToggle
+              property bool hovered: false
+              text: root.isExpanded(row.modelData.iface) ? "▾ custom MAC" : "▸ custom MAC"
+              color: hovered ? root.foreground : Color.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.underline: hovered
+
+              MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onEntered: customMacToggle.hovered = true
+                onExited: customMacToggle.hovered = false
+                onClicked: root.toggleExpanded(row.modelData.iface)
               }
             }
 
@@ -181,6 +234,7 @@ Panel {
             // is_valid_mac is the actual security boundary, this is just
             // UI feedback.
             RowLayout {
+              visible: root.isExpanded(row.modelData.iface)
               width: parent.width
               spacing: Style.space(6)
 
@@ -192,6 +246,7 @@ Panel {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 verticalPadding: Style.space(4)
+                enabled: !service.busy
                 onAccepted: {
                   if (!root.macRe.test(text)) return
                   service.setMac(row.modelData.iface, text)
@@ -200,10 +255,11 @@ Panel {
               }
 
               Button {
-                text: "Set"
+                readonly property string label: root.actionLabel(row.modelData.iface)
+                text: label !== "" ? label : "Set"
                 foreground: root.foreground
                 fontFamily: root.fontFamily
-                enabled: root.macRe.test(macField.text)
+                enabled: !service.busy && root.macRe.test(macField.text)
                 onClicked: {
                   service.setMac(row.modelData.iface, macField.text)
                   macField.text = ""
@@ -220,10 +276,11 @@ Panel {
       }
 
       Button {
-        visible: service.installed && service.anyRandomized
-        text: "Restore All"
+        visible: service.installed && (service.anyRandomized || service.pendingAction === "panic")
+        text: service.pendingAction === "panic" ? "Restoring All…" : "Restore All"
         foreground: root.urgent
         fontFamily: root.fontFamily
+        enabled: !service.busy
         onClicked: service.panic()
       }
     }

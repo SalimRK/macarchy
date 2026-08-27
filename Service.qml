@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 
 // All state lives here, polled from `macarchy status --json`. Panel.qml
@@ -18,6 +17,17 @@ Item {
 
   readonly property bool anyRandomized: interfaces.some(function(i) { return i.randomized })
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 5, 2, 300)
+
+  // Which interface (if any) has an action in flight, and which one --
+  // "randomize" | "restore" | "set" | "panic" ("" iface for panic, since
+  // it touches every interface at once). Tracked here rather than left to
+  // a fire-and-forget execDetached so the panel can show real progress
+  // instead of going quiet for up to refreshIntervalSec seconds after a
+  // click, and so other rows can disable themselves while one action is
+  // mid-flight -- same reasoning as tormarchy's own `busy` gate.
+  property string pendingIface: ""
+  property string pendingAction: ""
+  readonly property bool busy: pendingAction !== ""
 
   function intSetting(name, fallback, min, max) {
     var value = settings ? settings[name] : undefined
@@ -75,28 +85,37 @@ Item {
     }
   }
 
-  function randomize(iface) {
-    Quickshell.execDetached(["/usr/local/bin/macarchy", "randomize", iface])
-    root.refresh()
+  // One action at a time, same serialization tormarchy's runNetworkAction
+  // uses -- a second click while one is already running would otherwise
+  // race the same interface.
+  function runAction(iface, args, action) {
+    if (actionProc.running) return
+    pendingIface = iface
+    pendingAction = action
+    actionProc.command = ["/usr/local/bin/macarchy"].concat(args)
+    actionProc.running = true
   }
 
-  function restore(iface) {
-    Quickshell.execDetached(["/usr/local/bin/macarchy", "restore", iface])
-    root.refresh()
-  }
+  function randomize(iface) { runAction(iface, ["randomize", iface], "randomize") }
+  function restore(iface) { runAction(iface, ["restore", iface], "restore") }
+  function toggle(iface) { runAction(iface, ["toggle", iface], "toggle") }
+  function setMac(iface, mac) { runAction(iface, ["set", iface, mac], "set") }
+  function panic() { runAction("", ["panic"], "panic") }
 
-  function toggle(iface) {
-    Quickshell.execDetached(["/usr/local/bin/macarchy", "toggle", iface])
-    root.refresh()
-  }
-
-  function setMac(iface, mac) {
-    Quickshell.execDetached(["/usr/local/bin/macarchy", "set", iface, mac])
-    root.refresh()
-  }
-
-  function panic() {
-    Quickshell.execDetached(["/usr/local/bin/macarchy", "panic"])
-    root.refresh()
+  Process {
+    id: actionProc
+    running: false
+    command: []
+    stdout: StdioCollector { id: actionStdout; waitForEnd: true }
+    stderr: StdioCollector { id: actionStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.lastError = String(actionStderr.text || actionStdout.text
+          || ("macarchy " + root.pendingAction + " exited " + exitCode))
+      }
+      root.pendingIface = ""
+      root.pendingAction = ""
+      root.refresh()
+    }
   }
 }
