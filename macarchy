@@ -218,6 +218,35 @@ cmd_setup() {
 
   step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
+  # $SELF and its sibling polkit assets live in the user-writable checkout
+  # this script was run from. If setup read them by path throughout --
+  # across a pacman install and several separate install/xmllint/sed calls
+  # -- a same-UID process could swap any of them mid-run and get its
+  # content installed as root (arbitrary code in $BIN_DIR, or a
+  # promptless polkit rule). Snapshot the exact bytes into a root-owned,
+  # mode-700 staging directory in one shot, as the very first thing done
+  # as root, and install only from these frozen copies from here on.
+  local snap
+  snap=$(mktemp -d) || die "could not create a secure staging directory"
+  # EXIT, not RETURN: die() exits the whole script directly, which a
+  # RETURN trap does not catch.
+  trap 'rm -rf "$snap"' EXIT
+  chmod 700 "$snap"
+
+  local -a src_paths=(
+    "$SELF"
+    "$repo_dir/etc/polkit/com.macarchy.policy"
+    "$repo_dir/etc/polkit/49-macarchy.rules.in"
+  )
+  local -a src_names=(macarchy com.macarchy.policy 49-macarchy.rules.in)
+  local i path name
+  for i in "${!src_paths[@]}"; do
+    path="${src_paths[$i]}"
+    name="${src_names[$i]}"
+    [[ -f $path && ! -L $path ]] || die "$path is missing or not a regular file"
+    cp -p "$path" "$snap/$name" || die "could not stage $path"
+  done
+
   step "Installing macchanger"
   if command -v macchanger >/dev/null 2>&1; then
     echo "  already installed"
@@ -226,16 +255,16 @@ cmd_setup() {
   fi
 
   step "Installing macarchy into $BIN_DIR"
-  install -m 0755 "$SELF" "$BIN_DIR/macarchy"
+  install -m 0755 "$snap/macarchy" "$BIN_DIR/macarchy"
   echo "  $BIN_DIR/macarchy"
 
   step "Installing the polkit policy"
   if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$repo_dir/etc/polkit/com.macarchy.policy" \
+    xmllint --noout "$snap/com.macarchy.policy" \
       || die "the polkit policy is not well-formed XML; refusing to install it"
     echo "  policy XML is well-formed"
   fi
-  install -m 0644 "$repo_dir/etc/polkit/com.macarchy.policy" "$POLKIT_ACTIONS/com.macarchy.policy"
+  install -m 0644 "$snap/com.macarchy.policy" "$POLKIT_ACTIONS/com.macarchy.policy"
   echo "  $POLKIT_ACTIONS/com.macarchy.policy"
 
   install -d -m 0755 "$POLKIT_RULES"
@@ -243,7 +272,7 @@ cmd_setup() {
     echo "  SKIPPED the rule: could not tell who invoked sudo, so it cannot name a user." >&2
   else
     sed "s/@MACARCHY_USER@/$target_user/g" \
-      "$repo_dir/etc/polkit/49-macarchy.rules.in" >"$POLKIT_RULES/49-macarchy.rules"
+      "$snap/49-macarchy.rules.in" >"$POLKIT_RULES/49-macarchy.rules"
     chmod 0644 "$POLKIT_RULES/49-macarchy.rules"
     echo "  $POLKIT_RULES/49-macarchy.rules (granted to $target_user)"
   fi
