@@ -124,7 +124,7 @@ Panel {
         visible: !service.installed
         width: parent.width
         wrapMode: Text.WordWrap
-        text: "Not set up yet. Run: sudo macarchy setup"
+        text: "Not set up yet. Run: macarchy setup"
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.body

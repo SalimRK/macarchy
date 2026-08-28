@@ -12,17 +12,19 @@ it isn't already there.
 
 ```bash
 omarchy plugin add https://github.com/SalimRK/macarchy.git --enable
-sudo ~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy setup
+~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy setup
 ```
 
 `setup` needs a terminal and tells you everything it touches as it goes.
 For the record, that's: `macchanger` installed, `macarchy` copied to
 `/usr/local/bin`, and a polkit rule so toggling doesn't ask for a password.
+Run it plainly, without `sudo` in front -- it elevates itself, and asks
+for your password at that point.
 
 ## Removing it
 
 ```bash
-sudo ~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy uninstall
+~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy uninstall
 omarchy plugin remove oniomarchy.macarchy
 ```
 
@@ -53,7 +55,7 @@ track of which interfaces you touched.
 | `macarchy set <iface> <mac>` | Set one interface to a specific MAC address. |
 | `macarchy toggle <iface>` | Flip between randomized and permanent. |
 | `macarchy panic` | Restore every interface at once. |
-| `macarchy setup` / `uninstall [--purge]` | Install or remove the system side. Terminal + sudo only. |
+| `macarchy setup` / `uninstall [--purge]` | Install or remove the system side. Run without `sudo`; terminal only. |
 
 ## What it costs
 

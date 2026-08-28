@@ -20,11 +20,11 @@ shellcheck:
 	shellcheck macarchy
 
 install:
-	sudo ./macarchy setup
+	./macarchy setup
 
 reinstall:
-	sudo ./macarchy uninstall
-	sudo ./macarchy setup
+	./macarchy uninstall
+	./macarchy setup
 	omarchy-restart-shell
 
 doctor:
@@ -36,7 +36,7 @@ validate: qml-check shellcheck
 help:
 	@echo "qml-check    qmllint, import noise filtered out"
 	@echo "shellcheck   shellcheck against the macarchy CLI script"
-	@echo "install      sudo ./macarchy setup"
+	@echo "install      ./macarchy setup"
 	@echo "reinstall    uninstall, setup, restart the shell"
 	@echo "doctor       ./macarchy status"
 	@echo "validate     qml-check + shellcheck + omarchy plugin validate"
