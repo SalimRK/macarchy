@@ -119,19 +119,19 @@ Panel {
         fontFamily: root.fontFamily
       }
 
-      // Setup hasn't run yet, or the CLI's own JSON came back unparsable.
+      // First read still pending, or status keeps failing.
       Text {
-        visible: !service.installed
+        visible: !service.loaded
         width: parent.width
         wrapMode: Text.WordWrap
-        text: "Not set up yet. Run: macarchy setup"
+        text: service.lastError !== "" ? service.lastError : "Reading interfaces…"
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
       }
 
       Text {
-        visible: service.installed && service.interfaces.length === 0
+        visible: service.loaded && service.interfaces.length === 0
         width: parent.width
         text: "No real network interfaces found."
         color: root.dim
@@ -140,7 +140,7 @@ Panel {
       }
 
       Repeater {
-        model: service.installed ? service.interfaces : []
+        model: service.loaded ? service.interfaces : []
 
         delegate: Item {
           id: row
@@ -271,12 +271,12 @@ Panel {
       }
 
       PanelSeparator {
-        visible: service.installed && service.interfaces.length > 0
+        visible: service.loaded && service.interfaces.length > 0
         foreground: root.foreground
       }
 
       Button {
-        visible: service.installed && (service.anyRandomized || service.pendingAction === "panic")
+        visible: service.loaded && (service.anyRandomized || service.pendingAction === "panic")
         text: service.pendingAction === "panic" ? "Restoring All…" : "Restore All"
         foreground: root.urgent
         fontFamily: root.fontFamily

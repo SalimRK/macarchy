@@ -5,32 +5,66 @@ randomizes. Click it again, it's back to the permanent one.
 
 ---
 
-Needs Omarchy 4.x and `macchanger`. `setup` installs `macchanger` itself if
-it isn't already there.
+Needs Omarchy 4.x. Nothing else -- it uses `ip` from iproute2, which is
+already on every Arch system.
 
 ## Install
 
 ```bash
 omarchy plugin add https://github.com/SalimRK/macarchy.git --enable
-~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy setup
 ```
 
-`setup` needs a terminal and tells you everything it touches as it goes.
-For the record, that's: `macchanger` installed, `macarchy` copied to
-`/usr/local/bin`, and a polkit rule so toggling doesn't ask for a password.
-Run it plainly, without `sudo` in front -- it elevates itself, and asks
-for your password at that point.
+That's it. There is no setup step: nothing is installed system-wide, no
+polkit rule, no package, and none of the plugin's own code ever runs as
+root.
+
+## Privileges
+
+Reading MAC state needs no privileges. How a change is made depends on
+who manages the interface:
+
+- **NetworkManager** (the usual case): Macarchy sets the active
+  connection's `cloned-mac-address` and reconnects it, through NM's own
+  permissions. No root and no password prompt. Restoring clears that
+  setting again, back to NM's default.
+- **Anything else**: exactly two commands run as root, both
+  `/usr/bin/ip` from the signed iproute2 package with plain arguments:
+
+  ```
+  ip link set dev <iface> down
+  ip link set dev <iface> address <mac> up
+  ```
+
+  From a bar click these go through `pkexec`'s stock admin action, so the
+  polkit prompt shows the exact command before you approve it -- expect
+  two prompts per change. From a terminal they go through `sudo`, which
+  caches your password after the first one.
+
+Never run `macarchy` itself with `sudo`; it refuses.
+
+## Upgrading from 0.1.0
+
+0.1.0 had a `setup` step that installed a copy of the script and a
+passwordless polkit rule. Neither is used anymore; remove them with:
+
+```bash
+sudo rm -f /usr/local/bin/macarchy \
+  /usr/share/polkit-1/actions/com.macarchy.policy \
+  /etc/polkit-1/rules.d/49-macarchy.rules
+```
+
+`macchanger` is no longer needed either (`sudo pacman -Rns macchanger` if
+nothing else uses it).
 
 ## Removing it
 
 ```bash
-~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy uninstall
+~/.config/omarchy/plugins/oniomarchy.macarchy/macarchy panic
 omarchy plugin remove oniomarchy.macarchy
 ```
 
-`uninstall` restores every interface to its permanent MAC first, then
-removes the polkit rule and the installed binary. Add `--purge` to also
-remove the `macchanger` package.
+`panic` puts every interface back on its permanent MAC first, so you
+aren't left on a randomized one.
 
 ## Panel
 
@@ -55,23 +89,16 @@ track of which interfaces you touched.
 | `macarchy set <iface> <mac>` | Set one interface to a specific MAC address. |
 | `macarchy toggle <iface>` | Flip between randomized and permanent. |
 | `macarchy panic` | Restore every interface at once. |
-| `macarchy setup` / `uninstall [--purge]` | Install or remove the system side. Run without `sudo`; terminal only. |
 
 ## What it costs
 
-Changing a MAC address bounces the link: if NetworkManager manages the
-interface, it's disconnected and reconnected around the change, which
-means a brief drop in connectivity on that interface.
+Changing a MAC address bounces the link, so expect a brief drop in
+connectivity on that interface.
 
-A randomized MAC doesn't survive every driver/firmware combination
-through a real reassociation — confirmed on an Intel `iwlwifi` card,
-where the permanent MAC comes back the moment the interface actually
-re-associates with the AP. This isn't something NetworkManager's own
-`cloned-mac-address` setting can override (tested: setting it to
-`preserve` made no difference), which means the reset happens in the
-driver/firmware during association itself, below anything userspace
-configures. `macarchy status` always reports the truth, so this shows up
-rather than silently failing.
+On a NetworkManager interface the randomized MAC is stored on that
+connection's profile, so it sticks across reconnects to the same network
+until you restore it. Randomize/Restore need the interface to be
+connected, since that's how Macarchy finds the profile to change.
 
 ## Not yet built
 

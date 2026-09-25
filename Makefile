@@ -1,7 +1,7 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 QML_FILES := Panel.qml Service.qml
 
-.PHONY: qml-check shellcheck install reinstall doctor validate help
+.PHONY: qml-check shellcheck doctor validate help
 
 # qs.Commons and qs.Ui cannot resolve without a full Omarchy install, so
 # most output is import noise -- filtered the same way tormarchy's own
@@ -19,14 +19,6 @@ qml-check:
 shellcheck:
 	shellcheck macarchy
 
-install:
-	./macarchy setup
-
-reinstall:
-	./macarchy uninstall
-	./macarchy setup
-	omarchy-restart-shell
-
 doctor:
 	./macarchy status
 
@@ -36,7 +28,5 @@ validate: qml-check shellcheck
 help:
 	@echo "qml-check    qmllint, import noise filtered out"
 	@echo "shellcheck   shellcheck against the macarchy CLI script"
-	@echo "install      ./macarchy setup"
-	@echo "reinstall    uninstall, setup, restart the shell"
 	@echo "doctor       ./macarchy status"
 	@echo "validate     qml-check + shellcheck + omarchy plugin validate"

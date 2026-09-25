@@ -11,12 +11,17 @@ Item {
 
   // One entry per real interface: {iface, current, permanent, randomized}.
   property var interfaces: []
-  property bool installed: false
+  // False until the first status read lands (or if it keeps failing).
+  property bool loaded: false
   property string lastError: ""
   property bool refreshing: false
 
   readonly property bool anyRandomized: interfaces.some(function(i) { return i.randomized })
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 5, 2, 300)
+
+  // The CLI runs straight from this plugin checkout, as the user -- there
+  // is no installed copy. If it elevates at all, it is only for `ip link set`.
+  readonly property string cli: decodeURIComponent(Qt.resolvedUrl("macarchy").toString().replace(/^file:\/\//, ""))
 
   // Which interface (if any) has an action in flight, and which one --
   // "randomize" | "restore" | "set" | "panic" ("" iface for panic, since
@@ -50,26 +55,13 @@ Item {
     onTriggered: root.refresh()
   }
 
-  // Modeled on tormarchy's own statusProcess: onStreamFinished alone never
-  // fires if the binary can't be spawned at all (confirmed live -- before
-  // `macarchy setup` has installed /usr/local/bin/macarchy, Quickshell logs
-  // "Process failed to start" and no stdout stream ever opens), so
-  // `installed` would stay stuck at its initial default forever. Checking
-  // exitCode in onExited is what actually distinguishes "not installed yet"
-  // (127, shell convention for command-not-found) from a real parse error.
   Process {
     id: statusProc
     running: false
-    command: ["/usr/local/bin/macarchy", "status", "--json"]
+    command: ["/bin/bash", root.cli, "status", "--json"]
     stdout: StdioCollector { id: statusStdout; waitForEnd: true }
     onExited: function(exitCode) {
       root.refreshing = false
-      if (exitCode === 127) {
-        root.installed = false
-        root.interfaces = []
-        root.lastError = ""
-        return
-      }
       if (exitCode !== 0) {
         root.lastError = "macarchy status exited " + exitCode
         return
@@ -77,7 +69,7 @@ Item {
       try {
         var parsed = JSON.parse(statusStdout.text)
         root.interfaces = parsed.interfaces || []
-        root.installed = true
+        root.loaded = true
         root.lastError = ""
       } catch (e) {
         root.lastError = String(e)
@@ -92,7 +84,7 @@ Item {
     if (actionProc.running) return
     pendingIface = iface
     pendingAction = action
-    actionProc.command = ["/usr/local/bin/macarchy"].concat(args)
+    actionProc.command = ["/bin/bash", root.cli].concat(args)
     actionProc.running = true
   }
 
